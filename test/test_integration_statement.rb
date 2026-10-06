@@ -246,7 +246,8 @@ class IntegrationStatementTestCase < SQLite3::TestCase
     @db.statement_timeout = 200
     assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
 
-    assert_operator ticks, :>, 50
+    # about 0 if the query held the GVL; macOS 1ms sleeps run long, so ~40 there vs ~150 on linux
+    assert_operator ticks, :>, 10
   ensure
     ticker&.kill
     @db.statement_timeout = 0
