@@ -42,6 +42,7 @@ extern VALUE cSqlite3Blob;
 #include <exception.h>
 #include <backup.h>
 #include <timespec.h>
+#include <gvl.h>
 
 int bignum_to_int64(VALUE big, sqlite3_int64 *result);
 

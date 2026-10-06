@@ -238,4 +238,57 @@ class IntegrationStatementTestCase < SQLite3::TestCase
   ensure
     @db.statement_timeout = 0
   end
+
+  def test_other_threads_run_during_long_running_query
+    ticks = 0
+    ticker = Thread.new { loop { ticks += 1; sleep 0.001 } }
+
+    @db.statement_timeout = 200
+    assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
+
+    assert_operator ticks, :>, 50
+  ensure
+    ticker&.kill
+    @db.statement_timeout = 0
+  end
+
+  # Thread#kill only works mid-query because sqlite3_interrupt is the
+  # unblocking function for the GVL-free step.
+  def test_long_running_query_can_be_cancelled_from_another_thread
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    worker = Thread.new do
+      Thread.current.report_on_exception = false
+      @db.execute(SLOW_RECURSIVE_SQL)
+    end
+
+    sleep 0.05 # let the worker get into sqlite3_step
+    worker.kill
+    worker.join(5) or flunk "worker thread did not unblock within 5s"
+
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    assert_operator elapsed, :<, 1.0, "expected cancellation within 1s, took #{elapsed}s"
+  end
+
+  # ActiveRecord's connection pool reuses a connection after an interrupt.
+  def test_connection_remains_usable_after_interrupt
+    @db.statement_timeout = 10
+    assert_raises(SQLite3::InterruptException) { @db.execute(SLOW_RECURSIVE_SQL) }
+    @db.statement_timeout = 0
+
+    assert_equal [[1]], @db.execute("select 1")
+  ensure
+    @db.statement_timeout = 0
+  end
+
+  def test_execute_batch_can_be_cancelled_from_another_thread
+    worker = Thread.new do
+      Thread.current.report_on_exception = false
+      @db.execute_batch2(SLOW_RECURSIVE_SQL)
+    end
+
+    sleep 0.05 # let the worker get into sqlite3_step
+    worker.kill
+    worker.join(5) or flunk "worker thread did not unblock within 5s"
+    assert_equal [[1]], @db.execute("select 1")
+  end
 end
