@@ -252,8 +252,8 @@ class IntegrationStatementTestCase < SQLite3::TestCase
     @db.statement_timeout = 0
   end
 
-  # Thread#kill only works mid-query because sqlite3_interrupt is the
-  # unblocking function for the GVL-free step.
+  # Thread#kill only works mid-query because the GVL-free step checks for
+  # pending Ruby interrupts every 1000 sqlite steps.
   def test_long_running_query_can_be_cancelled_from_another_thread
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     worker = Thread.new do
@@ -290,5 +290,66 @@ class IntegrationStatementTestCase < SQLite3::TestCase
     worker.kill
     worker.join(5) or flunk "worker thread did not unblock within 5s"
     assert_equal [[1]], @db.execute("select 1")
+  end
+
+  # Runs long enough for the other thread to act mid-query, and has a known result.
+  BOUNDED_SQL = "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 5000000) SELECT count(*) FROM r"
+
+  def assert_query_completes_despite
+    other = Thread.new do
+      sleep 0.05 # let the main thread get into sqlite3_step
+      yield
+    end
+
+    assert_equal [[5_000_000]], @db.execute(BOUNDED_SQL)
+  ensure
+    other&.join
+  end
+
+  def test_signal_during_query_does_not_interrupt_it
+    previous = trap("USR1") {}
+    assert_query_completes_despite { Process.kill("USR1", Process.pid) }
+  ensure
+    trap("USR1", previous)
+  end
+
+  def test_child_process_exit_during_query_does_not_interrupt_it
+    assert_query_completes_despite { Process.wait(Process.spawn("true")) }
+  end
+
+  def test_thread_wakeup_during_query_does_not_interrupt_it
+    main = Thread.current
+    assert_query_completes_despite { main.wakeup }
+  end
+
+  def test_thread_raise_cancels_running_query
+    main = Thread.current
+    raiser = Thread.new do
+      sleep 0.05 # let the main thread get into sqlite3_step
+      main.raise("stop")
+    end
+
+    error = assert_raises(RuntimeError) { @db.execute(SLOW_RECURSIVE_SQL) }
+    assert_equal "stop", error.message
+    assert_equal [[1]], @db.execute("select 1")
+  ensure
+    raiser&.join
+  end
+
+  # ActiveRecord defers interrupts this way around COMMIT.
+  def test_deferred_thread_raise_waits_for_the_query
+    main = Thread.current
+    result = nil
+    raiser = Thread.new do
+      sleep 0.05 # let the main thread get into sqlite3_step
+      main.raise("stop")
+    end
+
+    assert_raises(RuntimeError) do
+      Thread.handle_interrupt(RuntimeError => :never) { result = @db.execute(BOUNDED_SQL) }
+    end
+    assert_equal [[5_000_000]], result
+  ensure
+    raiser&.join
   end
 end

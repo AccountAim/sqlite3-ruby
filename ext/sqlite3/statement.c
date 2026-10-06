@@ -139,7 +139,7 @@ step(VALUE self)
 
     stmt = ctx->st;
 
-    value = rb_sqlite3_step_without_gvl(stmt);
+    value = rb_sqlite3_step_without_gvl(ctx->db, stmt);
     if (rb_errinfo() != Qnil) {
         /* some user defined function was invoked as a callback during step and
          * it raised an exception that has been suppressed until step returns.

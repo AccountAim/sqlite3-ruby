@@ -448,7 +448,7 @@ busy_handler(int argc, VALUE *argv, VALUE self)
     return self;
 }
 
-static int
+int
 rb_sqlite3_statement_timeout(void *context)
 {
     sqlite3RubyPtr ctx = (sqlite3RubyPtr)context;
@@ -1141,11 +1141,11 @@ exec_batch(VALUE self, VALUE sql, VALUE results_as_hash)
     REQUIRE_OPEN_DB(ctx);
 
     if (results_as_hash == Qtrue) {
-        status = rb_sqlite3_exec_without_gvl(ctx->db, StringValuePtr(sql), (sqlite3_callback)hash_callback_function_gvl,
+        status = rb_sqlite3_exec_without_gvl(ctx, StringValuePtr(sql), (sqlite3_callback)hash_callback_function_gvl,
                               (void *)callback_ary,
                               &errMsg);
     } else {
-        status = rb_sqlite3_exec_without_gvl(ctx->db, StringValuePtr(sql), (sqlite3_callback)regular_callback_function_gvl,
+        status = rb_sqlite3_exec_without_gvl(ctx, StringValuePtr(sql), (sqlite3_callback)regular_callback_function_gvl,
                               (void *)callback_ary,
                               &errMsg);
     }
