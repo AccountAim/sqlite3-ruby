@@ -52,7 +52,8 @@ module Sqlite3
           recipe.configure_options += [
             "--disable-shared",
             "--enable-static",
-            "--enable-fts5"
+            "--enable-fts5",
+            "--disable-readline" # keeps the sqlite3 program portable
           ]
           ENV.to_h.tap do |env|
             user_cflags = with_config("sqlite-cflags")
