@@ -63,6 +63,11 @@ Rake::ExtensionTask.new("sqlite3_native", SQLITE3_SPEC) do |ext|
     # remove things not needed for precompiled gems
     spec.dependencies.reject! { |dep| dep.name == "mini_portile2" }
     spec.metadata.delete("msys2_mingw_dependencies")
+
+    # the sqlite3 program built alongside the packaged library; see SQLite3.cli_path
+    programs = Dir["ports/*/sqlite3/*/bin/sqlite3"]
+    raise "expected one built sqlite3 program, found #{programs.inspect}" unless programs.length == 1
+    spec.files += programs
   end
 end
 
