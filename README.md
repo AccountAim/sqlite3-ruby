@@ -1,3 +1,16 @@
+> [!NOTE]
+> **AccountAim fork** of [sparklemotion/sqlite3-ruby](https://github.com/sparklemotion/sqlite3-ruby).
+> Our changes sit as a few commits on top of upstream `main` (`git log upstream/main..`):
+>
+> - **`statement_timeout` honors its duration.** Upstream sets the deadline to "now", so long
+>   queries are interrupted almost at once; the deadline is also cleared on `Statement#reset!`.
+> - **Queries run without the GVL.** `Statement#step` and `execute_batch2` release the GVL, so
+>   other threads keep running during long queries, and `Thread#kill` / `Thread#raise` cancel a
+>   running query through `sqlite3_interrupt`. Ruby callbacks (UDFs, aggregates, busy handler,
+>   authorizer, collations, trace) take the GVL back first. See `ext/sqlite3/gvl.c`.
+>
+> To pull in upstream: `git fetch upstream && git rebase upstream/main`.
+
 # Ruby Interface for SQLite3
 
 ## Overview
