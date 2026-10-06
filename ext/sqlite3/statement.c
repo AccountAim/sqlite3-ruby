@@ -139,7 +139,7 @@ step(VALUE self)
 
     stmt = ctx->st;
 
-    value = sqlite3_step(stmt);
+    value = rb_sqlite3_step_without_gvl(stmt);
     if (rb_errinfo() != Qnil) {
         /* some user defined function was invoked as a callback during step and
          * it raised an exception that has been suppressed until step returns.
@@ -340,6 +340,7 @@ reset_bang(VALUE self)
     REQUIRE_OPEN_STMT(ctx);
 
     sqlite3_reset(ctx->st);
+    timespecclear(&ctx->db->stmt_deadline);
 
     ctx->done_p = 0;
 

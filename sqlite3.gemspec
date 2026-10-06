@@ -53,6 +53,8 @@ Gem::Specification.new do |s|
     "ext/sqlite3/exception.c",
     "ext/sqlite3/exception.h",
     "ext/sqlite3/extconf.rb",
+    "ext/sqlite3/gvl.c",
+    "ext/sqlite3/gvl.h",
     "ext/sqlite3/sqlite3.c",
     "ext/sqlite3/sqlite3_ruby.h",
     "ext/sqlite3/statement.c",
@@ -78,6 +80,7 @@ Gem::Specification.new do |s|
     "ext/sqlite3/backup.c",
     "ext/sqlite3/database.c",
     "ext/sqlite3/exception.c",
+    "ext/sqlite3/gvl.c",
     "ext/sqlite3/sqlite3.c",
     "ext/sqlite3/statement.c"
   ]

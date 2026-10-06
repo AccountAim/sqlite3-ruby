@@ -175,6 +175,40 @@ rb_sqlite3_aggregator_final(sqlite3_context *ctx)
     rb_sqlite3_aggregate_instance_destroy(ctx);
 }
 
+typedef struct {
+    sqlite3_context *ctx;
+    int argc;
+    sqlite3_value **argv;
+} aggregator_step_args_t;
+
+static void *
+rb_sqlite3_aggregator_step_body(void *ptr)
+{
+    aggregator_step_args_t *args = (aggregator_step_args_t *)ptr;
+    rb_sqlite3_aggregator_step(args->ctx, args->argc, args->argv);
+    return NULL;
+}
+
+static void
+rb_sqlite3_aggregator_step_gvl(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    aggregator_step_args_t args = { ctx, argc, argv };
+    rb_sqlite3_with_gvl(rb_sqlite3_aggregator_step_body, &args);
+}
+
+static void *
+rb_sqlite3_aggregator_final_body(void *ctx)
+{
+    rb_sqlite3_aggregator_final((sqlite3_context *)ctx);
+    return NULL;
+}
+
+static void
+rb_sqlite3_aggregator_final_gvl(sqlite3_context *ctx)
+{
+    rb_sqlite3_with_gvl(rb_sqlite3_aggregator_final_body, ctx);
+}
+
 /* call-seq: define_aggregator2(aggregator)
  *
  * Define an aggregate function according to a factory object (the "handler")
@@ -250,8 +284,8 @@ rb_sqlite3_define_aggregator2(VALUE self, VALUE aggregator, VALUE ruby_name)
                  SQLITE_UTF8,
                  (void *)aw,
                  NULL,
-                 rb_sqlite3_aggregator_step,
-                 rb_sqlite3_aggregator_final
+                 rb_sqlite3_aggregator_step_gvl,
+                 rb_sqlite3_aggregator_final_gvl
              );
 
     CHECK(ctx->db, status);

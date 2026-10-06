@@ -328,6 +328,26 @@ tracefunc(void *data, const char *sql)
     rb_funcall(ctx->trace_handler, rb_intern("call"), 1, rb_str_new2(sql));
 }
 
+typedef struct {
+    void *data;
+    const char *sql;
+} tracefunc_args_t;
+
+static void *
+tracefunc_body(void *ptr)
+{
+    tracefunc_args_t *args = (tracefunc_args_t *)ptr;
+    tracefunc(args->data, args->sql);
+    return NULL;
+}
+
+static void
+tracefunc_gvl(void *data, const char *sql)
+{
+    tracefunc_args_t args = { data, sql };
+    rb_sqlite3_with_gvl(tracefunc_body, &args);
+}
+
 /* call-seq:
  *    trace { |sql| ... }
  *    trace(Class.new { def call sql; end }.new)
@@ -351,7 +371,7 @@ trace(int argc, VALUE *argv, VALUE self)
 
     RB_OBJ_WRITE(self, &ctx->trace_handler, block);
 
-    sqlite3_trace(ctx->db, NIL_P(block) ? NULL : tracefunc, (void *)ctx);
+    sqlite3_trace(ctx->db, NIL_P(block) ? NULL : tracefunc_gvl, (void *)ctx);
 
     return self;
 }
@@ -367,6 +387,25 @@ rb_sqlite3_busy_handler(void *context, int count)
     if (Qfalse == result) { return 0; }
 
     return 1;
+}
+
+typedef struct {
+    void *context;
+    int count;
+} busy_handler_args_t;
+
+static void *
+rb_sqlite3_busy_handler_body(void *ptr)
+{
+    busy_handler_args_t *args = (busy_handler_args_t *)ptr;
+    return (void *)(intptr_t)rb_sqlite3_busy_handler(args->context, args->count);
+}
+
+static int
+rb_sqlite3_busy_handler_gvl(void *context, int count)
+{
+    busy_handler_args_t args = { context, count };
+    return (int)(intptr_t)rb_sqlite3_with_gvl(rb_sqlite3_busy_handler_body, &args);
 }
 
 /* call-seq:
@@ -400,7 +439,7 @@ busy_handler(int argc, VALUE *argv, VALUE self)
 
     status = sqlite3_busy_handler(
                  ctx->db,
-                 NIL_P(block) ? NULL : rb_sqlite3_busy_handler,
+                 NIL_P(block) ? NULL : rb_sqlite3_busy_handler_gvl,
                  (void *)ctx
              );
 
@@ -419,6 +458,12 @@ rb_sqlite3_statement_timeout(void *context)
     if (!timespecisset(&ctx->stmt_deadline)) {
         // Set stmt_deadline if not already set
         ctx->stmt_deadline = currentTime;
+        ctx->stmt_deadline.tv_sec  += ctx->stmt_timeout / 1000;
+        ctx->stmt_deadline.tv_nsec += (ctx->stmt_timeout % 1000) * 1000000L;
+        if (ctx->stmt_deadline.tv_nsec >= 1000000000L) {
+            ctx->stmt_deadline.tv_sec++;
+            ctx->stmt_deadline.tv_nsec -= 1000000000L;
+        }
     } else if (timespecafter(&currentTime, &ctx->stmt_deadline)) {
         return 1;
     }
@@ -587,6 +632,21 @@ rb_sqlite3_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     }
 }
 
+static void *
+rb_sqlite3_func_body(void *ptr)
+{
+    rb_sqlite3_func_args_t *args = (rb_sqlite3_func_args_t *)ptr;
+    rb_sqlite3_func(args->ctx, args->argc, args->argv);
+    return NULL;
+}
+
+static void
+rb_sqlite3_func_gvl(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    rb_sqlite3_func_args_t args = { .ctx = ctx, .argc = argc, .argv = argv };
+    rb_sqlite3_with_gvl(rb_sqlite3_func_body, &args);
+}
+
 #ifndef HAVE_RB_PROC_ARITY
 int
 rb_proc_arity(VALUE self)
@@ -618,7 +678,7 @@ define_function_with_flags(VALUE self, VALUE name, VALUE flags)
                  rb_proc_arity(block),
                  NUM2INT(flags),
                  (void *)block,
-                 rb_sqlite3_func,
+                 rb_sqlite3_func_gvl,
                  NULL,
                  NULL
              );
@@ -744,6 +804,36 @@ rb_sqlite3_auth(
     return SQLITE_IGNORE;
 }
 
+typedef struct {
+    void *ctx;
+    int action;
+    const char *a;
+    const char *b;
+    const char *c;
+    const char *d;
+} auth_args_t;
+
+static void *
+rb_sqlite3_auth_body(void *ptr)
+{
+    auth_args_t *args = (auth_args_t *)ptr;
+    return (void *)(intptr_t)rb_sqlite3_auth(
+               args->ctx, args->action, args->a, args->b, args->c, args->d);
+}
+
+static int
+rb_sqlite3_auth_gvl(
+    void *ctx,
+    int _action,
+    const char *_a,
+    const char *_b,
+    const char *_c,
+    const char *_d)
+{
+    auth_args_t args = { ctx, _action, _a, _b, _c, _d };
+    return (int)(intptr_t)rb_sqlite3_with_gvl(rb_sqlite3_auth_body, &args);
+}
+
 /* call-seq: set_authorizer = auth
  *
  * Set the authorizer for this database.  +auth+ must respond to +call+, and
@@ -764,7 +854,7 @@ set_authorizer(VALUE self, VALUE authorizer)
     REQUIRE_OPEN_DB(ctx);
 
     status = sqlite3_set_authorizer(
-                 ctx->db, NIL_P(authorizer) ? NULL : rb_sqlite3_auth, (void *)ctx
+                 ctx->db, NIL_P(authorizer) ? NULL : rb_sqlite3_auth_gvl, (void *)ctx
              );
 
     CHECK(ctx->db, status);
@@ -841,6 +931,29 @@ rb_comparator_func(void *ctx, int a_len, const void *a, int b_len, const void *b
     return NUM2INT(comparison);
 }
 
+typedef struct {
+    void *ctx;
+    int a_len;
+    const void *a;
+    int b_len;
+    const void *b;
+} comparator_args_t;
+
+static void *
+rb_comparator_func_body(void *ptr)
+{
+    comparator_args_t *args = (comparator_args_t *)ptr;
+    return (void *)(intptr_t)rb_comparator_func(
+               args->ctx, args->a_len, args->a, args->b_len, args->b);
+}
+
+static int
+rb_comparator_func_gvl(void *ctx, int a_len, const void *a, int b_len, const void *b)
+{
+    comparator_args_t args = { ctx, a_len, a, b_len, b };
+    return (int)(intptr_t)rb_sqlite3_with_gvl(rb_comparator_func_body, &args);
+}
+
 /* call-seq: db.collation(name, comparator)
  *
  * Add a collation with name +name+, and a +comparator+ object.  The
@@ -861,7 +974,7 @@ collation(VALUE self, VALUE name, VALUE comparator)
               StringValuePtr(name),
               SQLITE_UTF8,
               (void *)comparator,
-              NIL_P(comparator) ? NULL : rb_comparator_func));
+              NIL_P(comparator) ? NULL : rb_comparator_func_gvl));
 
     /* sqlite holds a raw pointer to the comparator, so keep it alive and unmoved. */
     collations = rb_iv_get(self, "@collations");
@@ -970,6 +1083,43 @@ regular_callback_function(VALUE callback_ary, int count, char **data, char **col
     return 0;
 }
 
+typedef struct {
+    VALUE callback_ary;
+    int count;
+    char **data;
+    char **columns;
+} exec_callback_args_t;
+
+static void *
+hash_callback_body(void *ptr)
+{
+    exec_callback_args_t *args = (exec_callback_args_t *)ptr;
+    return (void *)(intptr_t)hash_callback_function(
+               args->callback_ary, args->count, args->data, args->columns);
+}
+
+static int
+hash_callback_function_gvl(VALUE callback_ary, int count, char **data, char **columns)
+{
+    exec_callback_args_t args = { callback_ary, count, data, columns };
+    return (int)(intptr_t)rb_sqlite3_with_gvl(hash_callback_body, &args);
+}
+
+static void *
+regular_callback_body(void *ptr)
+{
+    exec_callback_args_t *args = (exec_callback_args_t *)ptr;
+    return (void *)(intptr_t)regular_callback_function(
+               args->callback_ary, args->count, args->data, args->columns);
+}
+
+static int
+regular_callback_function_gvl(VALUE callback_ary, int count, char **data, char **columns)
+{
+    exec_callback_args_t args = { callback_ary, count, data, columns };
+    return (int)(intptr_t)rb_sqlite3_with_gvl(regular_callback_body, &args);
+}
+
 
 /* Is invoked by calling db.execute_batch2(sql, &block)
  *
@@ -991,11 +1141,11 @@ exec_batch(VALUE self, VALUE sql, VALUE results_as_hash)
     REQUIRE_OPEN_DB(ctx);
 
     if (results_as_hash == Qtrue) {
-        status = sqlite3_exec(ctx->db, StringValuePtr(sql), (sqlite3_callback)hash_callback_function,
+        status = rb_sqlite3_exec_without_gvl(ctx->db, StringValuePtr(sql), (sqlite3_callback)hash_callback_function_gvl,
                               (void *)callback_ary,
                               &errMsg);
     } else {
-        status = sqlite3_exec(ctx->db, StringValuePtr(sql), (sqlite3_callback)regular_callback_function,
+        status = rb_sqlite3_exec_without_gvl(ctx->db, StringValuePtr(sql), (sqlite3_callback)regular_callback_function_gvl,
                               (void *)callback_ary,
                               &errMsg);
     }

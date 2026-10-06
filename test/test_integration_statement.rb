@@ -192,19 +192,103 @@ class IntegrationStatementTestCase < SQLite3::TestCase
     assert called
   end
 
+  # Effectively unbounded — must be aborted by statement_timeout to return.
+  SLOW_RECURSIVE_SQL = <<~SQL
+    WITH RECURSIVE r(n) AS (
+      SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 1000000000
+    )
+    SELECT count(*) FROM r;
+  SQL
+
   def test_long_running_statements_get_interrupted_when_statement_timeout_set
     @db.statement_timeout = 10
-    assert_raises(SQLite3::InterruptException) do
-      @db.execute <<~SQL
-        WITH RECURSIVE r(i) AS (
-          VALUES(0)
-          UNION ALL
-          SELECT i FROM r
-          LIMIT 100000
-        )
-        SELECT i FROM r ORDER BY i LIMIT 1;
-      SQL
-    end
+    assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
+  ensure
     @db.statement_timeout = 0
+  end
+
+  def test_statement_timeout_honors_budget_duration
+    [50, 100, 250].each do |budget|
+      @db.statement_timeout = budget
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
+      elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).to_i
+
+      assert_operator elapsed, :>=, budget,
+        "expected elapsed >= #{budget}ms, got #{elapsed}ms"
+      assert_operator elapsed, :<, budget + 200,
+        "expected elapsed < #{budget + 200}ms, got #{elapsed}ms"
+    end
+  ensure
+    @db.statement_timeout = 0
+  end
+
+  # Deadline lives on the database struct, so re-executing a cached prepared
+  # statement after a sleep > timeout must not interrupt on the first progress
+  # tick using the prior execution's stale deadline. The CTE is just a cheap
+  # way to run >1000 opcodes so the progress handler actually fires.
+  def test_statement_timeout_resets_deadline_between_executions_of_same_stmt
+    @db.statement_timeout = 100
+    sql = "with recursive r(n) as (select 1 union all select n+1 from r where n<200) select count(*) from r"
+    stmt = @db.prepare(sql)
+    assert_equal [[200]], stmt.execute!.to_a
+    sleep 0.2
+    assert_equal [[200]], stmt.execute!.to_a
+    stmt.close
+  ensure
+    @db.statement_timeout = 0
+  end
+
+  def test_other_threads_run_during_long_running_query
+    ticks = 0
+    ticker = Thread.new { loop { ticks += 1; sleep 0.001 } }
+
+    @db.statement_timeout = 200
+    assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
+
+    assert_operator ticks, :>, 50
+  ensure
+    ticker&.kill
+    @db.statement_timeout = 0
+  end
+
+  # Thread#kill only works mid-query because sqlite3_interrupt is the
+  # unblocking function for the GVL-free step.
+  def test_long_running_query_can_be_cancelled_from_another_thread
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    worker = Thread.new do
+      Thread.current.report_on_exception = false
+      @db.execute(SLOW_RECURSIVE_SQL)
+    end
+
+    sleep 0.05 # let the worker get into sqlite3_step
+    worker.kill
+    worker.join(5) or flunk "worker thread did not unblock within 5s"
+
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    assert_operator elapsed, :<, 1.0, "expected cancellation within 1s, took #{elapsed}s"
+  end
+
+  # ActiveRecord's connection pool reuses a connection after an interrupt.
+  def test_connection_remains_usable_after_interrupt
+    @db.statement_timeout = 10
+    assert_raises(SQLite3::InterruptException) { @db.execute(SLOW_RECURSIVE_SQL) }
+    @db.statement_timeout = 0
+
+    assert_equal [[1]], @db.execute("select 1")
+  ensure
+    @db.statement_timeout = 0
+  end
+
+  def test_execute_batch_can_be_cancelled_from_another_thread
+    worker = Thread.new do
+      Thread.current.report_on_exception = false
+      @db.execute_batch2(SLOW_RECURSIVE_SQL)
+    end
+
+    sleep 0.05 # let the worker get into sqlite3_step
+    worker.kill
+    worker.join(5) or flunk "worker thread did not unblock within 5s"
+    assert_equal [[1]], @db.execute("select 1")
   end
 end
