@@ -63,7 +63,8 @@ module Sqlite3
               "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
               "-DSQLITE_USE_URI=1",
               "-DSQLITE_ENABLE_DBPAGE_VTAB=1",
-              "-DSQLITE_ENABLE_DBSTAT_VTAB=1"
+              "-DSQLITE_ENABLE_DBSTAT_VTAB=1",
+              "-DSQLITE_MAX_ATTACHED=50"
             ]
             env["CFLAGS"] = [user_cflags, env["CFLAGS"], more_cflags].flatten.join(" ")
             recipe.configure_options += env.slice(*ENV_ALLOWLIST)

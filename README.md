@@ -8,6 +8,12 @@
 >   other threads keep running during long queries, and `Thread#kill` / `Thread#raise` cancel a
 >   running query through `sqlite3_interrupt`. Ruby callbacks (UDFs, aggregates, busy handler,
 >   authorizer, collations, trace) take the GVL back first. See `ext/sqlite3/gvl.c`.
+> - **Published as `aim-sqlite3`**, versioned `<upstream>.<n>` (e.g. `2.9.6.1`) and released by
+>   pushing tag `v2.9.6.1`. Precompiled for x86_64/aarch64 Linux and x86_64/arm64 macOS, with a
+>   source gem for anything else. The packaged sqlite is built with `SQLITE_MAX_ATTACHED=50`,
+>   and every gem carries the `sqlite3` program from the same build at `SQLite3.cli_path`.
+>   CI and releases use `aim-ci.yml` / `aim-release.yml`; upstream workflows are disabled in the
+>   repository settings.
 >
 > To pull in upstream: `git fetch upstream && git rebase upstream/main`.
 

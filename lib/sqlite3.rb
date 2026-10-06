@@ -17,3 +17,4 @@ module SQLite3
 end
 
 require "sqlite3/version_info"
+require "sqlite3/cli"
