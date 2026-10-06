@@ -340,6 +340,7 @@ reset_bang(VALUE self)
     REQUIRE_OPEN_STMT(ctx);
 
     sqlite3_reset(ctx->st);
+    timespecclear(&ctx->db->stmt_deadline);
 
     ctx->done_p = 0;
 

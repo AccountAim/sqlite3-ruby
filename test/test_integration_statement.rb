@@ -192,19 +192,50 @@ class IntegrationStatementTestCase < SQLite3::TestCase
     assert called
   end
 
+  # Effectively unbounded — must be aborted by statement_timeout to return.
+  SLOW_RECURSIVE_SQL = <<~SQL
+    WITH RECURSIVE r(n) AS (
+      SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 1000000000
+    )
+    SELECT count(*) FROM r;
+  SQL
+
   def test_long_running_statements_get_interrupted_when_statement_timeout_set
     @db.statement_timeout = 10
-    assert_raises(SQLite3::InterruptException) do
-      @db.execute <<~SQL
-        WITH RECURSIVE r(i) AS (
-          VALUES(0)
-          UNION ALL
-          SELECT i FROM r
-          LIMIT 100000
-        )
-        SELECT i FROM r ORDER BY i LIMIT 1;
-      SQL
+    assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
+  ensure
+    @db.statement_timeout = 0
+  end
+
+  def test_statement_timeout_honors_budget_duration
+    [50, 100, 250].each do |budget|
+      @db.statement_timeout = budget
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      assert_raises(SQLite3::InterruptException) { @db.execute SLOW_RECURSIVE_SQL }
+      elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).to_i
+
+      assert_operator elapsed, :>=, budget,
+        "expected elapsed >= #{budget}ms, got #{elapsed}ms"
+      assert_operator elapsed, :<, budget + 200,
+        "expected elapsed < #{budget + 200}ms, got #{elapsed}ms"
     end
+  ensure
+    @db.statement_timeout = 0
+  end
+
+  # Deadline lives on the database struct, so re-executing a cached prepared
+  # statement after a sleep > timeout must not interrupt on the first progress
+  # tick using the prior execution's stale deadline. The CTE is just a cheap
+  # way to run >1000 opcodes so the progress handler actually fires.
+  def test_statement_timeout_resets_deadline_between_executions_of_same_stmt
+    @db.statement_timeout = 100
+    sql = "with recursive r(n) as (select 1 union all select n+1 from r where n<200) select count(*) from r"
+    stmt = @db.prepare(sql)
+    assert_equal [[200]], stmt.execute!.to_a
+    sleep 0.2
+    assert_equal [[200]], stmt.execute!.to_a
+    stmt.close
+  ensure
     @db.statement_timeout = 0
   end
 end
