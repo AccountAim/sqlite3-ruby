@@ -10,8 +10,8 @@
 >   authorizer, collations, trace) take the GVL back first. See `ext/sqlite3/gvl.c`.
 > - **Published as `aim-sqlite3`**, versioned `<upstream>.<n>` (e.g. `2.9.6.1`) and released by
 >   pushing tag `v2.9.6.1` on `main`. PR branches publish release candidates (`v2.9.6.1.rc1`,
->   `rc2`, …) to validate in apps before merging. Precompiled for x86_64/aarch64 Linux and x86_64/arm64 macOS, with a
->   source gem for anything else. The packaged sqlite is built with `SQLITE_MAX_ATTACHED=50`,
+>   `rc2`, …) to validate in apps before merging. Precompiled for x86_64/aarch64 Linux and
+>   x86_64/arm64 macOS, with a source gem for anything else. The packaged sqlite is built with `SQLITE_MAX_ATTACHED=50`,
 >   and every gem carries the `sqlite3` program from the same build at `SQLite3.cli_path`.
 >   CI and releases use `aim-ci.yml` / `aim-release.yml`; upstream workflows are disabled in the
 >   repository settings.
