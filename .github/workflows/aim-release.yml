@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   version:
-    name: "Check tag matches SQLite3::VERSION"
+    name: "Check tag matches the gem version"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
       - if: github.ref_type == 'tag'
         run: |
-          version=$(ruby -r./lib/sqlite3/version -e 'print SQLite3::VERSION')
+          version=$(ruby -e 'print Gem::Specification.load("sqlite3.gemspec").version')
           test "${GITHUB_REF_NAME}" = "v${version}" || { echo "tag ${GITHUB_REF_NAME} does not match version ${version}"; exit 1; }
 
   native_setup:
