@@ -4,17 +4,21 @@
 >
 > - **`statement_timeout` honors its duration.** Upstream sets the deadline to "now", so long
 >   queries are interrupted almost at once; the deadline is also cleared on `Statement#reset!`.
-> - **Queries run without the GVL.** `Statement#step` and `execute_batch2` release the GVL, so
->   other threads keep running during long queries, and `Thread#kill` / `Thread#raise` cancel a
->   running query through `sqlite3_interrupt`. Ruby callbacks (UDFs, aggregates, busy handler,
->   authorizer, collations, trace) take the GVL back first. See `ext/sqlite3/gvl.c`.
-> - **Published as `aim-sqlite3`**, versioned `<upstream>.<n>` (e.g. `2.9.6.1`) and released by
->   pushing tag `v2.9.6.1` on `main`. PR branches publish release candidates (`v2.9.6.1.rc1`, `rc2`,
->   …) to validate in apps before merging. Precompiled for x86_64/aarch64 Linux and x86_64/arm64
->   macOS, with a source gem for anything else. The packaged sqlite is built with
->   `SQLITE_MAX_ATTACHED=50`, and every gem carries the `sqlite3` program from the same build at
->   `SQLite3.cli_path`. CI and releases use `aim-ci.yml` / `aim-release.yml`; upstream workflows are
->   disabled in the repository settings.
+> - **Queries run without the GVL.** `Statement#step` and `execute_batch2` release the GVL, so other
+>   threads keep running during long queries. Each connection's progress handler checks for Ruby
+>   interrupts every 1000 steps: `Thread#kill`, `Thread#raise` and `throw` stop the query, while
+>   signals and `Thread#wakeup` let it continue. Ruby callbacks (UDFs, aggregates, busy handler,
+>   authorizer, collations, trace) take the GVL back first. A `Database` must not be used by two
+>   threads at once. See `ext/sqlite3/gvl.c`.
+> - **Published as `aim-sqlite3`**, versioned `<upstream>.<n>` (e.g. `2.9.6.1`; `<n>` is
+>   `SQLite3::AIM_VERSION` in `lib/sqlite3/aim_version.rb`) and released by pushing tag `v2.9.6.1`
+>   on `main`. PR branches publish release candidates (`v2.9.6.1.rc1`, `rc2`, …) to validate in apps
+>   before merging. Precompiled for x86_64/aarch64 Linux and x86_64/arm64 macOS, with a source gem
+>   for anything else. The packaged sqlite is built with `SQLITE_MAX_ATTACHED=50`, and every gem
+>   carries the `sqlite3` program from the same build at `SQLite3.cli_path`. CI and releases use
+>   `aim-ci.yml` / `aim-release.yml`; upstream workflows are disabled in the repository settings.
+> - **Fork tests** live in their own files (`test/test_aim_statement.rb`, `test/test_cli.rb`) so
+>   upstream's test files stay untouched.
 >
 > To pull in upstream: `git fetch upstream && git rebase upstream/main`.
 
