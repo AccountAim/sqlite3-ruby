@@ -28,7 +28,6 @@ typedef sqlite3Ruby *sqlite3RubyPtr;
 void rb_sqlite3_pin_array_and_contents(VALUE ary);
 
 void init_sqlite3_database();
-int rb_sqlite3_statement_timeout(void *context);
 void set_sqlite3_func_result(sqlite3_context *ctx, VALUE result);
 
 sqlite3RubyPtr sqlite3_database_unwrap(VALUE database);

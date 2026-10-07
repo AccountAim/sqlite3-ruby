@@ -296,12 +296,18 @@ class IntegrationStatementTestCase < SQLite3::TestCase
   BOUNDED_SQL = "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 5000000) SELECT count(*) FROM r"
 
   def assert_query_completes_despite
+    running = true
+    fired_mid_query = nil
     other = Thread.new do
       sleep 0.05 # let the main thread get into sqlite3_step
+      fired_mid_query = running
       yield
     end
 
     assert_equal [[5_000_000]], @db.execute(BOUNDED_SQL)
+    running = false
+    other.join
+    assert(fired_mid_query, "the event fired after the query finished")
   ensure
     other&.join
   end
@@ -340,8 +346,10 @@ class IntegrationStatementTestCase < SQLite3::TestCase
   def test_deferred_thread_raise_waits_for_the_query
     main = Thread.current
     result = nil
+    raised_mid_query = nil
     raiser = Thread.new do
       sleep 0.05 # let the main thread get into sqlite3_step
+      raised_mid_query = result.nil?
       main.raise("stop")
     end
 
@@ -349,7 +357,66 @@ class IntegrationStatementTestCase < SQLite3::TestCase
       Thread.handle_interrupt(RuntimeError => :never) { result = @db.execute(BOUNDED_SQL) }
     end
     assert_equal [[5_000_000]], result
+    assert(raised_mid_query, "the raise came after the query finished")
   ensure
     raiser&.join
+  end
+
+  # Killed only after the function returned: a kill landing inside its Ruby code turns into a
+  # TypeError in Statement#step (upstream re-raises with rb_exc_raise).
+  def test_query_that_ran_a_nested_query_on_its_connection_can_be_cancelled
+    nested_done = Queue.new
+    @db.define_function("run_nested_query") { @db.execute("select 1").first.first.tap { nested_done << true } }
+    sql = <<~SQL
+      WITH RECURSIVE once(x) AS MATERIALIZED (SELECT run_nested_query()),
+        r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 1000000000)
+      SELECT count(*) FROM once, r
+    SQL
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    worker = Thread.new do
+      Thread.current.report_on_exception = false
+      @db.execute(sql)
+    end
+
+    nested_done.pop
+    sleep 0.05 # let the function return and the long part start
+    worker.kill
+    worker.join(5) or flunk "worker thread did not unblock within 5s"
+
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    assert_operator elapsed, :<, 1.0, "expected cancellation within 1s, took #{elapsed}s"
+  end
+
+  # Forked: before the fix, the authorizer call aborted the process ("called by a thread which has GVL").
+  def test_raise_delivered_as_a_query_returns_leaves_later_callbacks_working
+    skip("interpreter doesn't support fork") unless Process.respond_to?(:fork)
+    skip("valgrind doesn't handle forking") if i_am_running_in_valgrind
+
+    read, write = IO.pipe
+    pid = Process.fork do
+      read.close
+      db = SQLite3::Database.new(":memory:")
+      main = Thread.current
+      begin
+        Thread.handle_interrupt(RuntimeError => :on_blocking) do
+          raiser = Thread.new { main.raise "delivered as the query returns" }
+          Thread.pass while raiser.alive?
+          db.execute("select 1")
+        end
+      rescue RuntimeError
+        # expected; what matters is the next query
+      end
+      db.authorizer = ->(*) { true } # fires during prepare, with the GVL held
+      write.write(db.execute("select 2").inspect)
+      exit!
+    end
+    write.close
+
+    result = IO.select([read], nil, nil, 10) && read.read
+    Process.kill(:KILL, pid) unless result
+    Process.waitpid(pid)
+    read.close
+
+    assert_equal("[[2]]", result)
   end
 end

@@ -198,6 +198,8 @@ sqlite3_database_unwrap(VALUE database)
     return ctx;
 }
 
+static int rb_sqlite3_progress(void *context);
+
 static VALUE
 rb_sqlite3_open_v2(VALUE self, VALUE file, VALUE mode, VALUE zvfs)
 {
@@ -231,6 +233,8 @@ rb_sqlite3_open_v2(VALUE self, VALUE file, VALUE mode, VALUE zvfs)
         ctx->db = NULL;
         CHECK_MSG(ctx->db, status, msg);
     }
+
+    sqlite3_progress_handler(ctx->db, 1000, rb_sqlite3_progress, (void *)ctx);
 
     if (flags & SQLITE_OPEN_READONLY) {
         ctx->flags |= SQLITE3_RB_DATABASE_READONLY;
@@ -448,7 +452,7 @@ busy_handler(int argc, VALUE *argv, VALUE self)
     return self;
 }
 
-int
+static int
 rb_sqlite3_statement_timeout(void *context)
 {
     sqlite3RubyPtr ctx = (sqlite3RubyPtr)context;
@@ -471,6 +475,14 @@ rb_sqlite3_statement_timeout(void *context)
     return 0;
 }
 
+/* Installed for the connection's lifetime, since sqlite allows one progress handler. */
+static int
+rb_sqlite3_progress(void *context)
+{
+    sqlite3RubyPtr ctx = (sqlite3RubyPtr)context;
+    return rb_sqlite3_interrupted() || (ctx->stmt_timeout && rb_sqlite3_statement_timeout(ctx));
+}
+
 /* call-seq: db.statement_timeout = ms
  *
  * Indicates that if a query lasts longer than the indicated number of
@@ -485,9 +497,6 @@ set_statement_timeout(VALUE self, VALUE milliseconds)
     TypedData_Get_Struct(self, sqlite3Ruby, &database_type, ctx);
 
     ctx->stmt_timeout = NUM2INT(milliseconds);
-    int n = NUM2INT(milliseconds) == 0 ? -1 : 1000;
-
-    sqlite3_progress_handler(ctx->db, n, rb_sqlite3_statement_timeout, (void *)ctx);
 
     return self;
 }
@@ -1141,11 +1150,11 @@ exec_batch(VALUE self, VALUE sql, VALUE results_as_hash)
     REQUIRE_OPEN_DB(ctx);
 
     if (results_as_hash == Qtrue) {
-        status = rb_sqlite3_exec_without_gvl(ctx, StringValuePtr(sql), (sqlite3_callback)hash_callback_function_gvl,
+        status = rb_sqlite3_exec_without_gvl(ctx->db, StringValuePtr(sql), (sqlite3_callback)hash_callback_function_gvl,
                               (void *)callback_ary,
                               &errMsg);
     } else {
-        status = rb_sqlite3_exec_without_gvl(ctx, StringValuePtr(sql), (sqlite3_callback)regular_callback_function_gvl,
+        status = rb_sqlite3_exec_without_gvl(ctx->db, StringValuePtr(sql), (sqlite3_callback)regular_callback_function_gvl,
                               (void *)callback_ary,
                               &errMsg);
     }
@@ -1203,6 +1212,8 @@ rb_sqlite3_open16(VALUE self, VALUE file)
         ctx->db = NULL;
         CHECK_MSG(ctx->db, status, msg);
     }
+
+    sqlite3_progress_handler(ctx->db, 1000, rb_sqlite3_progress, (void *)ctx);
 
     return INT2NUM(status);
 }
