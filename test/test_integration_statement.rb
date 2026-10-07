@@ -323,6 +323,24 @@ class IntegrationStatementTestCase < SQLite3::TestCase
     assert_query_completes_despite { Process.wait(Process.spawn("true")) }
   end
 
+  def test_throw_from_a_trap_handler_stops_the_query
+    previous = trap("USR1") { throw :bail }
+    signaller = Thread.new do
+      sleep 0.05 # let the main thread get into sqlite3_step
+      Process.kill("USR1", Process.pid)
+    end
+
+    result = catch(:bail) do
+      @db.execute(SLOW_RECURSIVE_SQL)
+      :finished
+    end
+    assert_nil result
+    assert_equal [[1]], @db.execute("select 1")
+  ensure
+    signaller&.join
+    trap("USR1", previous)
+  end
+
   def test_thread_wakeup_during_query_does_not_interrupt_it
     main = Thread.current
     assert_query_completes_despite { main.wakeup }

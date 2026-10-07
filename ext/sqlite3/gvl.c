@@ -89,8 +89,12 @@ call_without_gvl(void *(*func)(void *), void *data, char **errmsg)
 
     if (call.pending_state) {
         if (errmsg) { sqlite3_free(*errmsg); }
-        /* a trap handler run on the way out may have reset errinfo */
-        if (rb_obj_is_kind_of(call.pending_error, rb_eException)) { rb_exc_raise(call.pending_error); }
+        /* A trap handler run on the way out may have reset errinfo, so exceptions are re-raised
+         * from the captured value; throw and Thread#kill have no public API for that and rely on
+         * errinfo. throw's errinfo is internal data, not an object, hence the T_OBJECT check. */
+        if (RB_TYPE_P(call.pending_error, T_OBJECT) && rb_obj_is_kind_of(call.pending_error, rb_eException)) {
+            rb_exc_raise(call.pending_error);
+        }
         rb_jump_tag(call.pending_state);
     }
 
