@@ -1,12 +1,13 @@
 begin
   require_relative "lib/sqlite3/version"
+  require_relative "lib/sqlite3/aim_version"
 rescue LoadError
   puts "WARNING: could not load Sqlite3::VERSION"
 end
 
 Gem::Specification.new do |s|
   s.name = "aim-sqlite3"
-  s.version = defined?(SQLite3::VERSION) ? SQLite3::VERSION : "0.0.0"
+  s.version = defined?(SQLite3::AIM_VERSION) ? "#{SQLite3::VERSION}.#{SQLite3::AIM_VERSION}" : "0.0.0"
 
   s.summary = "AccountAim fork of the sqlite3 gem. Ruby library to interface with the SQLite3 database engine (http://www.sqlite.org)."
   s.description = <<~TEXT
@@ -61,6 +62,7 @@ Gem::Specification.new do |s|
     "ext/sqlite3/statement.h",
     "ext/sqlite3/timespec.h",
     "lib/sqlite3.rb",
+    "lib/sqlite3/aim_version.rb",
     "lib/sqlite3/cli.rb",
     "lib/sqlite3/constants.rb",
     "lib/sqlite3/database.rb",
