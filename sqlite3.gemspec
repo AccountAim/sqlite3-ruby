@@ -1,14 +1,15 @@
 begin
   require_relative "lib/sqlite3/version"
+  require_relative "lib/sqlite3/aim_version"
 rescue LoadError
   puts "WARNING: could not load Sqlite3::VERSION"
 end
 
 Gem::Specification.new do |s|
-  s.name = "sqlite3"
-  s.version = defined?(SQLite3::VERSION) ? SQLite3::VERSION : "0.0.0"
+  s.name = "aim-sqlite3"
+  s.version = defined?(SQLite3::AIM_VERSION) ? "#{SQLite3::VERSION}.#{SQLite3::AIM_VERSION}" : "0.0.0"
 
-  s.summary = "Ruby library to interface with the SQLite3 database engine (http://www.sqlite.org)."
+  s.summary = "AccountAim fork of the sqlite3 gem. Ruby library to interface with the SQLite3 database engine (http://www.sqlite.org)."
   s.description = <<~TEXT
     Ruby library to interface with the SQLite3 database engine (http://www.sqlite.org). Precompiled
     binaries are available for common platforms for recent versions of Ruby.
@@ -20,13 +21,13 @@ Gem::Specification.new do |s|
 
   s.required_ruby_version = Gem::Requirement.new(">= 3.2")
 
-  s.homepage = "https://github.com/sparklemotion/sqlite3-ruby"
+  s.homepage = "https://github.com/AccountAim/sqlite3-ruby"
   s.metadata = {
-    "homepage_uri" => "https://github.com/sparklemotion/sqlite3-ruby",
-    "bug_tracker_uri" => "https://github.com/sparklemotion/sqlite3-ruby/issues",
+    "homepage_uri" => "https://github.com/AccountAim/sqlite3-ruby",
+    "bug_tracker_uri" => "https://github.com/AccountAim/sqlite3-ruby/issues",
     "documentation_uri" => "https://sparklemotion.github.io/sqlite3-ruby/",
     "changelog_uri" => "https://github.com/sparklemotion/sqlite3-ruby/blob/master/CHANGELOG.md",
-    "source_code_uri" => "https://github.com/sparklemotion/sqlite3-ruby",
+    "source_code_uri" => "https://github.com/AccountAim/sqlite3-ruby",
 
     # https://github.com/oneclick/rubyinstaller2/wiki/For-gem-developers#msys2-library-dependency
     "msys2_mingw_dependencies" => "sqlite3",
@@ -61,6 +62,8 @@ Gem::Specification.new do |s|
     "ext/sqlite3/statement.h",
     "ext/sqlite3/timespec.h",
     "lib/sqlite3.rb",
+    "lib/sqlite3/aim_version.rb",
+    "lib/sqlite3/cli.rb",
     "lib/sqlite3/constants.rb",
     "lib/sqlite3/database.rb",
     "lib/sqlite3/errors.rb",

@@ -1,0 +1,150 @@
+name: aim-sqlite3 release
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+on:
+  push:
+    tags:
+      - "v*.*.*.*" # e.g. v2.9.6.1; upstream tags have three numbers
+  workflow_dispatch: # builds and tests without publishing
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: "Check tag matches the gem version"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: github.ref_type == 'tag'
+        run: |
+          version=$(ruby -e 'print Gem::Specification.load("sqlite3.gemspec").version')
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "tag ${GITHUB_REF_NAME} does not match version ${version}"; exit 1; }
+
+  native_setup:
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      rcd_image_version: ${{ steps.rcd_image_version.outputs.rcd_image_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ports/archives
+          key: ports-archives-tarball-${{ hashFiles('ext/sqlite3/extconf.rb','dependencies.yml') }}
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec ruby ./ext/sqlite3/extconf.rb --download-dependencies
+      - id: rcd_image_version
+        run: bundle exec ruby -e 'require "rake_compiler_dock"; puts "rcd_image_version=#{RakeCompilerDock::IMAGE_VERSION}"' >> $GITHUB_OUTPUT
+
+  # Each precompiled gem also carries the sqlite3 program; see SQLite3.cli_path.
+  build_native_gem:
+    needs: native_setup
+    name: "build ${{ matrix.platform }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
+          - x86_64-darwin
+          - arm64-darwin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ports/archives
+          key: ports-archives-tarball-${{ hashFiles('ext/sqlite3/extconf.rb','dependencies.yml') }}
+      - run: |
+          docker run --rm -v $PWD:/work -w /work \
+            ghcr.io/rake-compiler/rake-compiler-dock-image:${RCD_IMAGE_VERSION}-mri-${{ matrix.platform }} \
+            ./bin/test-gem-build --release gems ${{ matrix.platform }}
+        env:
+          RCD_IMAGE_VERSION: ${{ needs.native_setup.outputs.rcd_image_version }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "gem-${{ matrix.platform }}"
+          path: gems
+          if-no-files-found: error
+
+  # Fallback for other platforms: compiles on install, which also builds the sqlite3 program.
+  build_source_gem:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ports/archives
+          key: ports-archives-tarball-${{ hashFiles('ext/sqlite3/extconf.rb','dependencies.yml') }}
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: ./bin/test-gem-build --release gems ruby
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "gem-source"
+          path: gems
+          if-no-files-found: error
+
+  # Installs each gem on a runner of its own platform and runs the test suite against it.
+  test_gem:
+    needs: [build_native_gem, build_source_gem]
+    name: "test ${{ matrix.gem }} on ${{ matrix.runner }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { gem: x86_64-linux-gnu, runner: ubuntu-latest }
+          - { gem: aarch64-linux-gnu, runner: ubuntu-24.04-arm }
+          - { gem: x86_64-darwin, runner: macos-15-intel }
+          - { gem: arm64-darwin, runner: macos-latest }
+          - { gem: source, runner: ubuntu-latest }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "3.4"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: "gem-${{ matrix.gem }}"
+          path: gems
+      - run: ./bin/test-gem-install gems
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: test_gem
+    name: "Push aim-sqlite3 to RubyGems.org"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "3.4"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "gem-*"
+          path: gems
+          merge-multiple: true
+      - name: Print checksums
+        run: ls gems/*.gem | sort | xargs sha256sum
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+      - run: for gem in gems/*.gem; do gem push "${gem}"; done

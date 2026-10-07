@@ -1,0 +1,53 @@
+name: aim-sqlite3 test suite
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_WITHOUT: "development"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ports/archives
+          key: ports-archives-tarball-${{ hashFiles('ext/sqlite3/extconf.rb','dependencies.yml') }}
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec rake compile
+      - run: bundle exec rake test
+
+  # Installs the built gem the way an app would, so a file missing from the gemspec fails here.
+  install_source_gem:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: "3.4"
+      - run: gem build sqlite3.gemspec
+      - run: gem install --no-document ./aim-sqlite3-*.gem
+      - run: |
+          ruby -rsqlite3 -e '
+            puts SQLite3::VERSION_INFO
+            system(SQLite3.cli_path, ":memory:", "select sqlite_version()", exception: true)
+          '

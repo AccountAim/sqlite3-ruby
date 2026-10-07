@@ -107,12 +107,12 @@ describe File.basename(gemfile) do
       end
 
       it "contains extension C and header files" do
-        assert_equal(6, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.c", f) })
-        assert_equal(7, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.h", f) })
+        assert_equal(7, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.c", f) })
+        assert_equal(8, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.h", f) })
       end
 
       it "includes C files in extra_rdoc_files" do
-        assert_equal(6, gemspec.extra_rdoc_files.count { |f| File.fnmatch?("ext/**/*.c", f) })
+        assert_equal(7, gemspec.extra_rdoc_files.count { |f| File.fnmatch?("ext/**/*.c", f) })
       end
 
       it "contains the port files" do
@@ -149,16 +149,17 @@ describe File.basename(gemfile) do
       end
 
       it "contains extension C and header files" do
-        assert_equal(6, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.c", f) })
-        assert_equal(7, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.h", f) })
+        assert_equal(7, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.c", f) })
+        assert_equal(8, gemfile_contents.count { |f| File.fnmatch?("ext/**/*.h", f) })
       end
 
       it "includes C files in extra_rdoc_files" do
-        assert_equal(6, gemspec.extra_rdoc_files.count { |f| File.fnmatch?("ext/**/*.c", f) })
+        assert_equal(7, gemspec.extra_rdoc_files.count { |f| File.fnmatch?("ext/**/*.c", f) })
       end
 
-      it "does not contain the port files" do
-        assert_empty(gemfile_contents.grep(%r{^ports/}))
+      it "contains only the sqlite3 program from the port files" do
+        assert_equal(1, gemfile_contents.grep(%r{^ports/}).length)
+        assert_equal(1, gemfile_contents.grep(%r{^ports/[^/]+/sqlite3/[^/]+/bin/sqlite3$}).length)
       end
 
       it "does not contain the patch files" do
