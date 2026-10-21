@@ -1,5 +1,6 @@
 require "helper"
 require "open3"
+require "tmpdir"
 
 module SQLite3
   class TestCli < SQLite3::TestCase
@@ -24,6 +25,17 @@ module SQLite3
 
       assert_includes(gem_options, "MAX_ATTACHED=50")
       assert_includes(cli_options.split, "MAX_ATTACHED=50")
+    end
+
+    # 3.53.0-3.53.2 created .import tables with ANY columns, which stored "007" as 7
+    def test_cli_import_keeps_csv_values_as_written
+      Dir.mktmpdir do |dir|
+        csv = File.join(dir, "values.csv")
+        File.write(csv, "zip,code\n01234,007\n")
+        values, = Open3.capture2(SQLite3.cli_path, ":memory:", ".import --csv #{csv} t", "select zip, code from t")
+
+        assert_equal("01234|007", values.strip)
+      end
     end
   end
 end
